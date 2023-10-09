@@ -43,16 +43,17 @@ const xPrisma = prisma.$extends({
 
       const prismaCleint = Prisma.getExtensionContext(prisma);
       return new Promise<void>((resolve, reject) => {
-        return prismaCleint.$transaction(async (tx) => {
-          await new Promise((innerResolve, innerReject) => {
-            asyncLocalStorage.enterWith({
-              tx: tx,
-              rollback: innerReject,
-              commit: innerResolve,
+        return prismaCleint
+          .$transaction(async (tx) => {
+            return await new Promise((innerResolve, innerReject) => {
+              asyncLocalStorage.enterWith({
+                tx: tx,
+                rollback: innerReject,
+                commit: innerResolve,
+              });
+              resolve();
             });
-            resolve();
-          });
-        }, options);
+          }, options);
       });
     },
     async $commit() {
@@ -72,37 +73,51 @@ const xPrisma = prisma.$extends({
   },
 });
 
-const transaction = async (isSuccess?: boolean) => {
+const transaction = async (func: () => Promise<void>) => {
   await xPrisma.$begin();
-  await Promise.all(
-    Array.from({ length: 1000 }, (_, i) =>
-      xPrisma.user.create({
-        data: {
-          email: ``,
-          lastName: ``,
-          firstName: ``,
-        },
-      })
-    )
-  );
-  await xPrisma.student.create({
-    data: {
-      firstName: '',
-      lastName: '',
-      email: '',
-    },
-  });
-  if (!isSuccess) throw new Error("rollback!");
-};
-
-export async function main(success: boolean) {
   try {
-    await xPrisma.$begin({ maxWait: 10000, timeout: 10000 });
-    await transaction(success);
+    await func();
     await xPrisma.$commit();
   } catch (e) {
     await xPrisma.$rollback(e);
-  };
+  }
+};
+
+class UserService {
+  constructor(private prisma: typeof xPrisma) {}
+
+  async addUser() {
+    return await this.prisma.user.create({
+      data: {
+        email: ``,
+        lastName: ``,
+        firstName: ``,
+      },
+    });
+  }
 }
 
-main(false);
+class StudentService {
+  constructor(private prisma: typeof xPrisma) {}
+  async addStudent() {
+    const result = await this.prisma.student.create({
+      data: {
+        email: ``,
+        lastName: ``,
+        firstName: ``,
+      },
+    });
+    return result;
+  }
+}
+
+export async function main() {
+  await transaction(async () => {
+    const userService = new UserService(xPrisma);
+    const studentService = new StudentService(xPrisma);
+    await userService.addUser();
+    await studentService.addStudent();
+  });
+}
+
+main();
