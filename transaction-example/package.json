@@ -5,6 +5,7 @@
     "dev": "ts-node script.ts",
     "generate": "prisma generate",
     "migrate": "prisma migrate deploy",
+    "prisma": "prisma",
     "seed": "prisma db seed"
   },
   "dependencies": {
