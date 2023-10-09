@@ -11,6 +11,12 @@ const asyncLocalStorage = new AsyncLocalStorage<{
   commit: (value: void | PromiseLike<void>) => void;
 }>();
 
+type Option = {
+  maxWait?: number;
+  timeout?: number;
+  isolationLevel?: Prisma.TransactionIsolationLevel;
+};
+
 const xPrisma = prisma.$extends({
   query: {
     $allModels: {
@@ -26,7 +32,7 @@ const xPrisma = prisma.$extends({
   },
   client: {
     // TODO: savepointを使ってネストしたトランザクションを実現する
-    async $begin() {
+    async $begin(options?: Option) {
       console.debug(`transaction begin`);
       const als = asyncLocalStorage.getStore();
       const isInTransaction = !!als?.tx;
@@ -36,19 +42,17 @@ const xPrisma = prisma.$extends({
       }
 
       const prismaCleint = Prisma.getExtensionContext(prisma);
-
       return new Promise<void>((resolve, reject) => {
-        return prismaCleint
-          .$transaction(async (tx) => {
-            await new Promise((innerResolve, innerReject) => {
-              asyncLocalStorage.enterWith({
-                tx: tx,
-                rollback: innerReject,
-                commit: innerResolve,
-              });
-              resolve();
-            })
+        return prismaCleint.$transaction(async (tx) => {
+          await new Promise((innerResolve, innerReject) => {
+            asyncLocalStorage.enterWith({
+              tx: tx,
+              rollback: innerReject,
+              commit: innerResolve,
+            });
+            resolve();
           });
+        }, options);
       });
     },
     async $commit() {
@@ -71,7 +75,7 @@ const xPrisma = prisma.$extends({
 const transaction = async (isSuccess?: boolean) => {
   await xPrisma.$begin();
   await Promise.all(
-    Array.from({ length: 100 }, (_, i) =>
+    Array.from({ length: 1000 }, (_, i) =>
       xPrisma.user.create({
         data: {
           email: ``,
@@ -81,12 +85,19 @@ const transaction = async (isSuccess?: boolean) => {
       })
     )
   );
+  await xPrisma.student.create({
+    data: {
+      firstName: '',
+      lastName: '',
+      email: '',
+    },
+  });
   if (!isSuccess) throw new Error("rollback!");
 };
 
 export async function main(success: boolean) {
   try {
-    await xPrisma.$begin();
+    await xPrisma.$begin({ maxWait: 10000, timeout: 10000 });
     await transaction(success);
     await xPrisma.$commit();
   } catch (e) {
